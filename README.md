@@ -1,0 +1,41 @@
+# Quiz Test Bot
+
+Bu bot `MOLIYA uzb.txt` faylidagi 322 ta savolni Telegram quiz sifatida yuboradi. Har bir savol uchun javob variantlari random tartibda keladi va 30 soniya tugashi bilan bot avtomatik keyingi savolga o'tadi.
+
+## O'rnatish
+
+1. Python 3.7+ o'rnating.
+2. Kutubxonalarni o'rnating:
+   ```
+   pip install -r requirements.txt
+   ```
+
+## Ishga tushirish
+
+1. Telegram Bot Father orqali bot yarating va token oling.
+2. Environment variable o'rnating:
+   ```
+   export BOT_TOKEN=your_bot_token_here
+   ```
+3. Botni ishga tushiring:
+   ```
+   python3 main.py
+   ```
+
+## Fayl tuzilmasi
+
+- `config.py`: Konfiguratsiya
+- `quiz_parser.py`: TXT faylni parse qilish
+- `quiz_logic.py`: Savollarni tanlash va variantlarni random qilish
+- `handlers.py`: Aiogram handlerlari va quiz oqimi
+- `main.py`: Asosiy fayl
+- `requirements.txt`: Kutubxonalar
+- `MOLIYA uzb.txt`: Savollar fayli
+- `bot.py`: Eski tajriba variant, joriy ishga tushirish yo'li emas
+
+## Ishlatish
+
+- Botga /start yuboring.
+- Bot 20 ta savolni quiz poll sifatida yuboradi.
+- Har bir savolda 30 soniya vaqt bor.
+- Foydalanuvchi javob bersa darhol, javob bermasa 30 soniyadan keyin avtomatik keyingi savol keladi.
