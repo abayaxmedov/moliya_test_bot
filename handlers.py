@@ -1,20 +1,25 @@
-from aiogram import Router, F, Bot, Dispatcher
+import asyncio
+import logging
+
+from aiogram import Router, F, Bot
 from aiogram.types import (
     Message,
     CallbackQuery,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
     PollAnswer,
-    Poll,
 )
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
-from aiogram.fsm.storage.base import BaseStorage, StorageKey
+
 from quiz_logic import get_random_questions
 from config import QUIZ_FILE
 
 router = Router()
-active_polls: dict[str, tuple[int, int, int]] = {}
+logger = logging.getLogger(__name__)
+
+quiz_timers: dict[tuple[int, int, int], asyncio.Task] = {}
+session_locks: dict[tuple[int, int, int], asyncio.Lock] = {}
 
 
 class QuizStates(StatesGroup):
@@ -22,18 +27,110 @@ class QuizStates(StatesGroup):
     quiz_active = State()
 
 
-def build_storage_key(session_key: tuple[int, int, int]) -> StorageKey:
-    bot_id, chat_id, user_id = session_key
-    return StorageKey(bot_id=bot_id, chat_id=chat_id, user_id=user_id)
+def get_session_key_from_state(state: FSMContext) -> tuple[int, int, int]:
+    return state.key.bot_id, state.key.chat_id, state.key.user_id
 
 
-async def send_question(bot, chat_id: int, state: FSMContext):
+def get_session_key(data: dict, state: FSMContext | None = None) -> tuple[int, int, int]:
+    session_key = data.get("session_key")
+    if session_key is not None:
+        return tuple(session_key)
+    if state is None:
+        raise RuntimeError("Session key is missing")
+    return get_session_key_from_state(state)
+
+
+def get_session_lock(session_key: tuple[int, int, int]) -> asyncio.Lock:
+    lock = session_locks.get(session_key)
+    if lock is None:
+        lock = asyncio.Lock()
+        session_locks[session_key] = lock
+    return lock
+
+
+def cancel_timer(session_key: tuple[int, int, int]) -> None:
+    task = quiz_timers.get(session_key)
+    current_task = asyncio.current_task()
+    if task is None:
+        return
+    if task is current_task:
+        return
+    if not task.done():
+        task.cancel()
+    quiz_timers.pop(session_key, None)
+
+
+def cleanup_runtime(session_key: tuple[int, int, int]) -> None:
+    cancel_timer(session_key)
+    lock = session_locks.get(session_key)
+    if lock is not None and not lock.locked():
+        session_locks.pop(session_key, None)
+
+
+async def handle_question_timeout(
+    bot: Bot,
+    session_state: FSMContext,
+    poll_id: str,
+    timeout: int = 30,
+) -> None:
+    session_key = get_session_key_from_state(session_state)
+
+    try:
+        await asyncio.sleep(timeout)
+
+        async with get_session_lock(session_key):
+            if await session_state.get_state() != QuizStates.quiz_active.state:
+                return
+
+            data = await session_state.get_data()
+            if data.get("current_poll_id") != poll_id:
+                return
+            if data.get("answered", False):
+                return
+
+            chat_id = data["chat_id"]
+            next_index = data["current_index"] + 1
+            await session_state.update_data(answered=True, current_index=next_index)
+
+            try:
+                await bot.stop_poll(chat_id, data["poll_msg_id"])
+            except Exception:
+                pass
+
+            try:
+                await bot.delete_message(chat_id, data["poll_msg_id"])
+            except Exception:
+                pass
+
+            await send_question(bot, chat_id, session_state)
+    except asyncio.CancelledError:
+        return
+    except Exception:
+        logger.exception("Unexpected error while processing quiz timeout")
+    finally:
+        current_task = asyncio.current_task()
+        if quiz_timers.get(session_key) is current_task:
+            quiz_timers.pop(session_key, None)
+
+
+def schedule_timeout(bot: Bot, state: FSMContext, poll_id: str, timeout: int = 30) -> None:
+    session_key = get_session_key_from_state(state)
+    cancel_timer(session_key)
+
+    session_state = FSMContext(storage=state.storage, key=state.key)
+    quiz_timers[session_key] = asyncio.create_task(
+        handle_question_timeout(bot, session_state, poll_id, timeout)
+    )
+
+
+async def send_question(bot: Bot, chat_id: int, state: FSMContext) -> None:
     data = await state.get_data()
+    session_key = get_session_key(data, state)
     questions = data["questions"]
     index = data["current_index"]
 
     if index >= len(questions):
-        # End quiz
+        cleanup_runtime(session_key)
         score = data["score"]
         total = len(questions)
         kb = InlineKeyboardMarkup(
@@ -49,7 +146,6 @@ async def send_question(bot, chat_id: int, state: FSMContext):
 
     q = questions[index]
 
-    # Ensure options are valid for Telegram (max 100 chars each)
     safe_options = []
     for opt in q["options"]:
         text = opt.strip().replace("\n", " ")
@@ -57,7 +153,6 @@ async def send_question(bot, chat_id: int, state: FSMContext):
             text = text[:97].rstrip() + "..."
         safe_options.append(text)
 
-    # Send poll quiz
     try:
         poll_msg = await bot.send_poll(
             chat_id=chat_id,
@@ -68,30 +163,22 @@ async def send_question(bot, chat_id: int, state: FSMContext):
             open_period=30,
             is_anonymous=False,
         )
-    except Exception as e:
-        # Log or ignore and skip to next question
-        print(f"Failed to send poll for question {index}: {e}")
+    except Exception:
+        logger.exception("Failed to send poll for question %s", index)
         await state.update_data(current_index=index + 1)
         await send_question(bot, chat_id, state)
         return
 
-    previous_poll_id = data.get("current_poll_id")
-    if previous_poll_id:
-        active_polls.pop(previous_poll_id, None)
-
-    session_key = tuple(data["session_key"])
-    active_polls[poll_msg.poll.id] = session_key
-
-    # Store poll id and message id
     await state.update_data(
         current_poll_id=poll_msg.poll.id,
         poll_msg_id=poll_msg.message_id,
         answered=False,
     )
+    schedule_timeout(bot, state, poll_msg.poll.id, timeout=30)
 
 
 @router.message(F.text == "/start")
-async def start_quiz(message: Message, state: FSMContext):
+async def start_quiz(message: Message, state: FSMContext) -> None:
     current_state = await state.get_state()
     if current_state == QuizStates.quiz_active:
         await message.answer(
@@ -99,8 +186,9 @@ async def start_quiz(message: Message, state: FSMContext):
         )
         return
 
-    # Get 20 random questions
     questions = get_random_questions(QUIZ_FILE, 20)
+    session_key = get_session_key_from_state(state)
+    cleanup_runtime(session_key)
 
     await state.set_state(QuizStates.quiz_active)
     await state.update_data(
@@ -109,100 +197,55 @@ async def start_quiz(message: Message, state: FSMContext):
         score=0,
         answered=False,
         chat_id=message.chat.id,
-        session_key=(state.key.bot_id, state.key.chat_id, state.key.user_id),
+        session_key=session_key,
     )
-
     await send_question(message.bot, message.chat.id, state)
 
 
 @router.poll_answer(QuizStates.quiz_active)
-async def handle_poll_answer(poll_answer: PollAnswer, state: FSMContext):
-    data = await state.get_data()
-    if poll_answer.poll_id != data.get("current_poll_id"):
-        return
+async def handle_poll_answer(poll_answer: PollAnswer, state: FSMContext) -> None:
+    session_key = get_session_key_from_state(state)
 
-    if data.get("answered", False):
-        return
-
-    user_option = poll_answer.option_ids[0] if poll_answer.option_ids else None
-    q = data["questions"][data["current_index"]]
-    correct = q["correct"]
-
-    score = data["score"]
-    if user_option == correct:
-        score += 1
-
-    await state.update_data(score=score, answered=True)
-    active_polls.pop(poll_answer.poll_id, None)
-
-    # Delete poll message
-    chat_id = data["chat_id"]
-    try:
-        await poll_answer.bot.stop_poll(chat_id, data["poll_msg_id"])
-    except Exception:
-        pass
-
-    try:
-        await poll_answer.bot.delete_message(chat_id, data["poll_msg_id"])
-    except Exception:
-        pass
-
-    # Next question
-    index = data["current_index"] + 1
-    await state.update_data(current_index=index, answered=False)
-    await send_question(poll_answer.bot, chat_id, state)
-
-
-@router.poll()
-async def handle_poll_update(
-    poll: Poll,
-    bot: Bot,
-    dispatcher: Dispatcher,
-    fsm_storage: BaseStorage,
-):
-    if not poll.is_closed:
-        return
-
-    session_key = active_polls.get(poll.id)
-    if session_key is None:
-        return
-
-    storage_key = build_storage_key(session_key)
-    async with dispatcher.fsm.events_isolation.lock(key=storage_key):
-        state = FSMContext(storage=fsm_storage, key=storage_key)
-        if await state.get_state() != QuizStates.quiz_active.state:
-            active_polls.pop(poll.id, None)
-            return
-
+    async with get_session_lock(session_key):
         data = await state.get_data()
-        if poll.id != data.get("current_poll_id"):
-            active_polls.pop(poll.id, None)
+        if poll_answer.poll_id != data.get("current_poll_id"):
             return
-
         if data.get("answered", False):
-            active_polls.pop(poll.id, None)
             return
 
-        # Timeout, delete poll message and next question
-        active_polls.pop(poll.id, None)
+        user_option = poll_answer.option_ids[0] if poll_answer.option_ids else None
+        q = data["questions"][data["current_index"]]
+        score = data["score"] + int(user_option == q["correct"])
+
+        await state.update_data(score=score, answered=True)
+        cancel_timer(session_key)
+
         chat_id = data["chat_id"]
         try:
-            await bot.delete_message(chat_id, data["poll_msg_id"])
+            await poll_answer.bot.stop_poll(chat_id, data["poll_msg_id"])
         except Exception:
             pass
 
-        index = data["current_index"] + 1
-        await state.update_data(current_index=index, answered=False)
-        await send_question(bot, chat_id, state)
+        try:
+            await poll_answer.bot.delete_message(chat_id, data["poll_msg_id"])
+        except Exception:
+            pass
+
+        await state.update_data(current_index=data["current_index"] + 1, answered=False)
+        await send_question(poll_answer.bot, chat_id, state)
 
 
 @router.callback_query(F.data == "restart")
-async def restart_quiz(callback: CallbackQuery, state: FSMContext):
+async def restart_quiz(callback: CallbackQuery, state: FSMContext) -> None:
+    data = await state.get_data()
+    if data:
+        cleanup_runtime(get_session_key(data, state))
+    await state.clear()
     await callback.answer()
-    await start_quiz(callback.message, state)
+    if callback.message:
+        await start_quiz(callback.message, state)
 
 
-# Ignore other messages during quiz
 @router.message(QuizStates.quiz_active)
-async def ignore_other(message: Message):
+async def ignore_other(message: Message) -> None:
     pass
