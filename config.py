@@ -2,7 +2,6 @@ import os
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 ENV_FILE = os.path.join(BASE_DIR, ".env")
-PROGRESS_FILE = os.path.join(BASE_DIR, "user_progress.json")
 
 
 def load_env_file(file_path: str) -> None:

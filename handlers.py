@@ -12,8 +12,8 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from quiz_logic import get_next_group_questions
-from config import GROUP_COUNT, PROGRESS_FILE, QUIZ_FILE
+from quiz_logic import get_group_questions
+from config import GROUP_COUNT, QUIZ_FILE
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -65,6 +65,20 @@ def cleanup_runtime(session_key: tuple[int, int, int]) -> None:
     lock = session_locks.get(session_key)
     if lock is not None and not lock.locked():
         session_locks.pop(session_key, None)
+
+
+def build_group_keyboard() -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(
+            text=f"{group_number}-guruh", callback_data=f"group:{group_number}"
+        )
+        for group_number in range(1, GROUP_COUNT + 1)
+    ]
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            buttons[index : index + 2] for index in range(0, len(buttons), 2)
+        ]
+    )
 
 
 async def handle_question_timeout(
@@ -180,28 +194,32 @@ async def send_question(bot: Bot, chat_id: int, state: FSMContext) -> None:
 
 
 @router.message(F.text == "/start")
-async def start_quiz(
-    message: Message, state: FSMContext, user_id: int | None = None
-) -> None:
+async def start_quiz(message: Message, state: FSMContext) -> None:
     current_state = await state.get_state()
     if current_state == QuizStates.quiz_active.state:
         await message.answer("Quiz davom etmoqda. Avval joriy testni tugating.")
         return
 
-    if user_id is None:
-        user_id = message.from_user.id if message.from_user else message.chat.id
-    group_number, questions = get_next_group_questions(
-        QUIZ_FILE, PROGRESS_FILE, user_id, GROUP_COUNT
+    await message.answer(
+        "Qaysi guruh savollarini bajarmoqchisiz?",
+        reply_markup=build_group_keyboard(),
     )
+
+
+async def start_group_quiz(
+    bot: Bot, chat_id: int, state: FSMContext, group_number: int
+) -> None:
+    questions = get_group_questions(QUIZ_FILE, group_number, GROUP_COUNT)
     if not questions:
-        await message.answer("Savollar topilmadi. Fayl formatini tekshiring.")
+        await bot.send_message(chat_id, "Savollar topilmadi. Fayl formatini tekshiring.")
         return
 
     session_key = get_session_key_from_state(state)
     cleanup_runtime(session_key)
 
-    await message.answer(
-        f"{group_number}-guruh savollari boshlanadi. Jami {len(questions)} ta savol."
+    await bot.send_message(
+        chat_id,
+        f"{group_number}-guruh savollari boshlanadi. Jami {len(questions)} ta savol.",
     )
 
     await state.set_state(QuizStates.quiz_active)
@@ -211,10 +229,35 @@ async def start_quiz(
         current_index=0,
         score=0,
         answered=False,
-        chat_id=message.chat.id,
+        chat_id=chat_id,
         session_key=session_key,
     )
-    await send_question(message.bot, message.chat.id, state)
+    await send_question(bot, chat_id, state)
+
+
+@router.callback_query(F.data.startswith("group:"))
+async def choose_group(callback: CallbackQuery, state: FSMContext) -> None:
+    current_state = await state.get_state()
+    if current_state == QuizStates.quiz_active.state:
+        await callback.answer("Quiz davom etmoqda.", show_alert=True)
+        return
+
+    try:
+        group_number = int(callback.data.split(":", 1)[1])
+    except (AttributeError, ValueError, IndexError):
+        await callback.answer("Guruh topilmadi.", show_alert=True)
+        return
+
+    if group_number < 1 or group_number > GROUP_COUNT:
+        await callback.answer("Guruh topilmadi.", show_alert=True)
+        return
+
+    await callback.answer()
+    if callback.message:
+        await callback.message.edit_text(f"{group_number}-guruh tanlandi.")
+        await start_group_quiz(
+            callback.bot, callback.message.chat.id, state, group_number
+        )
 
 
 @router.poll_answer(QuizStates.quiz_active)
@@ -253,7 +296,10 @@ async def restart_quiz(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.answer()
     if callback.message:
-        await start_quiz(callback.message, state, user_id=callback.from_user.id)
+        await callback.message.answer(
+            "Qaysi guruh savollarini bajarmoqchisiz?",
+            reply_markup=build_group_keyboard(),
+        )
 
 
 @router.message(QuizStates.quiz_active)
