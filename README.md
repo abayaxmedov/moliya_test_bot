@@ -1,10 +1,10 @@
 # Quiz Test Bot
 
-Bu bot `MOLIYA uzb.txt` faylidagi 322 ta savolni Telegram quiz sifatida yuboradi. Har bir savol uchun javob variantlari random tartibda keladi va 30 soniya tugashi bilan bot avtomatik keyingi savolga o'tadi.
+Bu bot `Davlat xususiy sheriklik.txt` faylidagi 150 ta savolni Telegram quiz sifatida yuboradi. Har bir savol uchun javob variantlari random tartibda keladi va 30 soniya tugashi bilan bot avtomatik keyingi savolga o'tadi.
 
 ## O'rnatish
 
-1. Python 3.7+ o'rnating.
+1. Python 3.10+ o'rnating.
 2. Kutubxonalarni o'rnating:
    ```
    pip install -r requirements.txt
@@ -30,8 +30,10 @@ Bu bot `MOLIYA uzb.txt` faylidagi 322 ta savolni Telegram quiz sifatida yuboradi
 - `handlers.py`: Aiogram handlerlari va quiz oqimi
 - `main.py`: Asosiy fayl
 - `requirements.txt`: Kutubxonalar
-- `MOLIYA uzb.txt`: Savollar fayli
+- `Davlat xususiy sheriklik.txt`: Savollar fayli
 - `bot.py`: Eski tajriba variant, joriy ishga tushirish yo'li emas
+
+Savollar faylida to'g'ri javob `#` belgisi bilan boshlanishi mumkin. Agar `#` bo'lmasa, bot eski formatga mos ravishda birinchi variantni to'g'ri javob deb oladi.
 
 ## Ishlatish
 

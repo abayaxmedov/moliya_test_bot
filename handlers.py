@@ -97,11 +97,6 @@ async def handle_question_timeout(
             except Exception:
                 pass
 
-            try:
-                await bot.delete_message(chat_id, data["poll_msg_id"])
-            except Exception:
-                pass
-
             await send_question(bot, chat_id, session_state)
     except asyncio.CancelledError:
         return
@@ -135,16 +130,21 @@ async def send_question(bot: Bot, chat_id: int, state: FSMContext) -> None:
         total = len(questions)
         kb = InlineKeyboardMarkup(
             inline_keyboard=[
-                [InlineKeyboardButton(text="Restart Quiz", callback_data="restart")]
+                [InlineKeyboardButton(text="Qayta boshlash", callback_data="restart")]
             ]
         )
         await bot.send_message(
-            chat_id, f"✅ You answered {score}/{total} correctly", reply_markup=kb
+            chat_id,
+            f"✅ Quiz tugadi. Siz {score}/{total} ta savolga to'g'ri javob berdingiz.",
+            reply_markup=kb,
         )
         await state.clear()
         return
 
     q = questions[index]
+    poll_question = f"{index + 1}. {q['question']}"
+    if len(poll_question) > 300:
+        poll_question = poll_question[:297].rstrip() + "..."
 
     safe_options = []
     for opt in q["options"]:
@@ -156,7 +156,7 @@ async def send_question(bot: Bot, chat_id: int, state: FSMContext) -> None:
     try:
         poll_msg = await bot.send_poll(
             chat_id=chat_id,
-            question=q["question"],
+            question=poll_question,
             options=safe_options,
             type="quiz",
             correct_option_id=q["correct"],
@@ -182,7 +182,7 @@ async def start_quiz(message: Message, state: FSMContext) -> None:
     current_state = await state.get_state()
     if current_state == QuizStates.quiz_active:
         await message.answer(
-            "Quiz already running. Finish it first or use /restart if available."
+            "Quiz davom etmoqda. Avval joriy testni tugating."
         )
         return
 
@@ -223,11 +223,6 @@ async def handle_poll_answer(poll_answer: PollAnswer, state: FSMContext) -> None
         chat_id = data["chat_id"]
         try:
             await poll_answer.bot.stop_poll(chat_id, data["poll_msg_id"])
-        except Exception:
-            pass
-
-        try:
-            await poll_answer.bot.delete_message(chat_id, data["poll_msg_id"])
         except Exception:
             pass
 

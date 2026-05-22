@@ -1,5 +1,6 @@
 import random
 import os
+from quiz_parser import parse_quiz_file
 from telegram import Update, Poll
 from telegram.ext import (
     Application,
@@ -13,7 +14,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is not set.")
 
-QUESTIONS_FILE = "MOLIYA uzb.txt"
+QUESTIONS_FILE = "Davlat xususiy sheriklik.txt"
 SESSION_SIZE = 20
 
 # In-memory state (keyed by chat_id)
@@ -23,23 +24,7 @@ poll_to_chat = {}
 
 
 def parse_questions(file_path):
-    with open(file_path, "r", encoding="utf-8") as f:
-        content = f.read()
-
-    questions = []
-    blocks = content.split("+++++")
-    for block in blocks:
-        if not block.strip():
-            continue
-        parts = block.strip().split("=====")
-        if len(parts) < 5:
-            continue
-
-        question = parts[0].strip()
-        options = [p.strip() for p in parts[1:5]]
-        questions.append({"question": question, "options": options, "correct": 0})
-
-    return questions
+    return parse_quiz_file(file_path)
 
 
 def make_session(questions):
@@ -155,11 +140,6 @@ async def handle_poll_answer(update: Update, context: ContextTypes.DEFAULT_TYPE)
     except Exception:
         pass
 
-    try:
-        await context.bot.delete_message(chat_id, session["current_poll_msg_id"])
-    except Exception:
-        pass
-
     session["index"] += 1
     await send_next_question(chat_id, context)
 
@@ -185,11 +165,6 @@ async def handle_poll(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.send_message(
         chat_id, "⏰ Vaqt tugadi. Keyingi savolga o'tilmoqda..."
     )
-
-    try:
-        await context.bot.delete_message(chat_id, session["current_poll_msg_id"])
-    except Exception:
-        pass
 
     session["index"] += 1
     await send_next_question(chat_id, context)

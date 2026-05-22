@@ -27,4 +27,4 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
     raise RuntimeError("BOT_TOKEN environment variable is not set.")
 
-QUIZ_FILE = "MOLIYA uzb.txt"
+QUIZ_FILE = "Davlat xususiy sheriklik.txt"

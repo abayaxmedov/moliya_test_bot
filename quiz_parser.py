@@ -1,4 +1,5 @@
 import random
+import re
 from typing import List, Dict, Any
 
 
@@ -6,37 +7,43 @@ def parse_quiz_file(file_path: str) -> List[Dict[str, Any]]:
     """
     Parse the quiz file and return list of questions.
     Each question dict: {'question': str, 'options': List[str], 'correct': int}
-    Format: question\n=====\noption1\n=====\noption2\n... separated by +++++
-    Correct is the first option (index 0)
+    Format: question\n=====\noption1\n=====\noption2\n... separated by +++++.
+    Correct option can be marked with leading #. If no marker exists, the first
+    option is treated as correct for backward compatibility.
     """
     questions = []
     with open(file_path, "r", encoding="utf-8") as f:
         content = f.read()
 
-    # Split by +++++
-    blocks = content.strip().split("+++++")
+    blocks = re.split(r"(?m)^\s*\+{5,}\s*$", content.strip())
 
-    def sanitize_option(option: str) -> str:
-        option = option.strip().replace("\n", " ")
-        if len(option) > 100:
-            option = option[:97].rstrip() + "..."
-        return option
+    def clean_text(text: str, max_len: int) -> str:
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > max_len:
+            text = text[: max_len - 3].rstrip() + "..."
+        return text
 
     for block in blocks:
-        lines = [line.strip() for line in block.strip().split("\n") if line.strip()]
-        if len(lines) < 5:  # question + 4 options
+        parts = [
+            part.strip()
+            for part in re.split(r"(?m)^\s*={3,}\s*$", block.strip())
+            if part.strip()
+        ]
+        if len(parts) < 5:  # question + 4 options
             continue
 
-        question = lines[0]
+        question = clean_text(parts[0], 300)
         options = []
-        for line in lines[1:]:
-            if line.startswith("====="):
-                continue
-            options.append(sanitize_option(line))
+        correct = 0
 
-        if len(options) == 4:
-            # Correct is the first option (index 0)
-            correct = 0
+        for index, raw_option in enumerate(parts[1:5]):
+            option = raw_option.strip()
+            if option.startswith("#"):
+                correct = index
+                option = option[1:].strip()
+            options.append(clean_text(option, 100))
+
+        if question and len(options) == 4 and all(options):
             questions.append(
                 {"question": question, "options": options, "correct": correct}
             )
@@ -48,8 +55,15 @@ def randomize_options(question: Dict[str, Any]) -> Dict[str, Any]:
     """
     Randomize the order of options and update correct index.
     """
-    opts = question["options"][:]
-    correct_option = opts[question["correct"]]
-    random.shuffle(opts)
-    new_correct = opts.index(correct_option)
-    return {"question": question["question"], "options": opts, "correct": new_correct}
+    option_pairs = [
+        {"text": option, "is_correct": index == question["correct"]}
+        for index, option in enumerate(question["options"])
+    ]
+    random.shuffle(option_pairs)
+    return {
+        "question": question["question"],
+        "options": [option["text"] for option in option_pairs],
+        "correct": next(
+            index for index, option in enumerate(option_pairs) if option["is_correct"]
+        ),
+    }
