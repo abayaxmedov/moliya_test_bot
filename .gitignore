@@ -1,5 +1,7 @@
 # Environment secrets
 .env
+user_progress.json
+user_progress.json.tmp
 
 # Virtual environments
 venv/

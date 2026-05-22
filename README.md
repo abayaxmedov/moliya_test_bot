@@ -2,6 +2,8 @@
 
 Bu bot `Davlat xususiy sheriklik.txt` faylidagi 150 ta savolni Telegram quiz sifatida yuboradi. Har bir savol uchun javob variantlari random tartibda keladi va 30 soniya tugashi bilan bot avtomatik keyingi savolga o'tadi.
 
+Savollar 8 ta guruhga bo'lingan. Foydalanuvchi har safar `/start` bosganda navbatdagi guruh savollari yuboriladi: 1-guruhdan 8-guruhgacha, keyin yana 1-guruhdan davom etadi.
+
 ## O'rnatish
 
 1. Python 3.10+ o'rnating.
@@ -31,6 +33,7 @@ Bu bot `Davlat xususiy sheriklik.txt` faylidagi 150 ta savolni Telegram quiz sif
 - `main.py`: Asosiy fayl
 - `requirements.txt`: Kutubxonalar
 - `Davlat xususiy sheriklik.txt`: Savollar fayli
+- `user_progress.json`: Foydalanuvchining navbatdagi guruhini saqlaydigan runtime fayl
 - `bot.py`: Eski tajriba variant, joriy ishga tushirish yo'li emas
 
 Savollar faylida to'g'ri javob `#` belgisi bilan boshlanishi mumkin. Agar `#` bo'lmasa, bot eski formatga mos ravishda birinchi variantni to'g'ri javob deb oladi.
@@ -38,6 +41,6 @@ Savollar faylida to'g'ri javob `#` belgisi bilan boshlanishi mumkin. Agar `#` bo
 ## Ishlatish
 
 - Botga /start yuboring.
-- Bot 20 ta savolni quiz poll sifatida yuboradi.
+- Bot navbatdagi guruh savollarini quiz poll sifatida yuboradi.
 - Har bir savolda 30 soniya vaqt bor.
 - Foydalanuvchi javob bersa darhol, javob bermasa 30 soniyadan keyin avtomatik keyingi savol keladi.

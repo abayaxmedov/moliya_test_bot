@@ -12,8 +12,8 @@ from aiogram.types import (
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from quiz_logic import get_random_questions
-from config import QUIZ_FILE
+from quiz_logic import get_next_group_questions
+from config import GROUP_COUNT, PROGRESS_FILE, QUIZ_FILE
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -142,7 +142,9 @@ async def send_question(bot: Bot, chat_id: int, state: FSMContext) -> None:
         return
 
     q = questions[index]
-    poll_question = f"{index + 1}. {q['question']}"
+    group_number = q.get("group_number", data.get("group_number"))
+    question_number = q.get("group_question_number", index + 1)
+    poll_question = f"{group_number}-guruh | {question_number}. {q['question']}"
     if len(poll_question) > 300:
         poll_question = poll_question[:297].rstrip() + "..."
 
@@ -178,21 +180,34 @@ async def send_question(bot: Bot, chat_id: int, state: FSMContext) -> None:
 
 
 @router.message(F.text == "/start")
-async def start_quiz(message: Message, state: FSMContext) -> None:
+async def start_quiz(
+    message: Message, state: FSMContext, user_id: int | None = None
+) -> None:
     current_state = await state.get_state()
-    if current_state == QuizStates.quiz_active:
-        await message.answer(
-            "Quiz davom etmoqda. Avval joriy testni tugating."
-        )
+    if current_state == QuizStates.quiz_active.state:
+        await message.answer("Quiz davom etmoqda. Avval joriy testni tugating.")
         return
 
-    questions = get_random_questions(QUIZ_FILE, 20)
+    if user_id is None:
+        user_id = message.from_user.id if message.from_user else message.chat.id
+    group_number, questions = get_next_group_questions(
+        QUIZ_FILE, PROGRESS_FILE, user_id, GROUP_COUNT
+    )
+    if not questions:
+        await message.answer("Savollar topilmadi. Fayl formatini tekshiring.")
+        return
+
     session_key = get_session_key_from_state(state)
     cleanup_runtime(session_key)
+
+    await message.answer(
+        f"{group_number}-guruh savollari boshlanadi. Jami {len(questions)} ta savol."
+    )
 
     await state.set_state(QuizStates.quiz_active)
     await state.update_data(
         questions=questions,
+        group_number=group_number,
         current_index=0,
         score=0,
         answered=False,
@@ -238,7 +253,7 @@ async def restart_quiz(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     await callback.answer()
     if callback.message:
-        await start_quiz(callback.message, state)
+        await start_quiz(callback.message, state, user_id=callback.from_user.id)
 
 
 @router.message(QuizStates.quiz_active)
